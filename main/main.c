@@ -49,7 +49,7 @@
 
 /* Application includes */
 #include "driver/i2c.h"
-#include "bme280.h"
+#include "bme280_task.h"
 
 /* Logging Task Defines. */
 #define mainLOGGING_MESSAGE_QUEUE_LENGTH    ( 32 )
@@ -198,7 +198,7 @@ int app_main( void )
         bme280_task_param_t* param = malloc(sizeof(bme280_task_param_t));
         param->task_idx = 0;
         param->i2c_port_num = I2C_MASTER_NUM;
-        xTaskCreate(bme280_task, "bme280_task", 1024 * 2, (void *)&param, 10, NULL);
+        xTaskCreate(bme280_task, "bme280_task", 1024 * 2, (void *)param, 10, NULL);
     }
 
     /* Start the scheduler.  Initialization that requires the OS to be running,
