@@ -383,6 +383,7 @@ int8_t bme280_init(struct bme280_dev *dev)
                 if (rslt == BME280_OK)
                 {
                     /* Read the calibration data */
+                    dev->delay_ms(10);
                     rslt = get_calib_data(dev);
                 }
                 break;
@@ -673,18 +674,10 @@ int8_t bme280_get_sensor_data(uint8_t sensor_comp, struct bme280_data *comp_data
     {
         /* Read the pressure and temperature data from the sensor */
         rslt = bme280_get_regs(BME280_DATA_ADDR, reg_data, BME280_P_T_H_DATA_LEN, dev);
-        //for (int i = 0; i < BME280_P_T_H_DATA_LEN; i++) {
-        //    ESP_LOGI("bme280_driver", "", task_idx, dev.chip_id);
-        //}
-
         if (rslt == BME280_OK)
         {
             /* Parse the read data from the sensor */
             bme280_parse_sensor_data(reg_data, &uncomp_data);
-
-            ESP_LOGI("bme280_driver", "pressure = %d", uncomp_data.pressure);
-            ESP_LOGI("bme280_driver", "temperature = %d", uncomp_data.temperature);
-            ESP_LOGI("bme280_driver", "humidity = %d", uncomp_data.humidity);
 
             /* Compensate the pressure and/or temperature and/or
              * humidity data from the sensor
@@ -1019,16 +1012,11 @@ static double compensate_temperature(const struct bme280_uncomp_data *uncomp_dat
     double temperature_max = 85;
 
     var1 = ((double)uncomp_data->temperature) / 16384.0 - ((double)calib_data->dig_T1) / 1024.0;
-    ESP_LOGI("bme280_driver", "var1 = %lf", var1);
     var1 = var1 * ((double)calib_data->dig_T2);
-    ESP_LOGI("bme280_driver", "var1 = %lf", var1);
     var2 = (((double)uncomp_data->temperature) / 131072.0 - ((double)calib_data->dig_T1) / 8192.0);
-    ESP_LOGI("bme280_driver", "var2 = %lf", var2);
     var2 = (var2 * var2) * ((double)calib_data->dig_T3);
-    ESP_LOGI("bme280_driver", "var2 = %lf", var2);    
     calib_data->t_fine = (int32_t)(var1 + var2);
     temperature = (var1 + var2) / 5120.0;
-    ESP_LOGI("bme280_driver", "temperature = %lf", temperature);
     if (temperature < temperature_min)
     {
         temperature = temperature_min;
@@ -1380,10 +1368,6 @@ static void parse_temp_press_calib_data(const uint8_t *reg_data, struct bme280_d
     calib_data->dig_P8 = (int16_t)BME280_CONCAT_BYTES(reg_data[21], reg_data[20]);
     calib_data->dig_P9 = (int16_t)BME280_CONCAT_BYTES(reg_data[23], reg_data[22]);
     calib_data->dig_H1 = reg_data[25];
-
-    ESP_LOGI("bme280_driver", "dig_T1 = %d", calib_data->dig_T1);
-    ESP_LOGI("bme280_driver", "dig_T2 = %d", calib_data->dig_T2);
-    ESP_LOGI("bme280_driver", "dig_T3 = %d", calib_data->dig_T3);
 }
 
 /*!

@@ -19,6 +19,11 @@
 
 static const char *TAG = "BME280";
 
+void user_delay_ms(uint32_t msec)
+{
+    vTaskDelay(msec / portTICK_RATE_MS);
+}
+
 int8_t user_i2c_read(uint8_t id, uint8_t reg_addr, uint8_t *data, uint16_t len)
 {
     if (len == 0) {
@@ -57,11 +62,6 @@ int8_t user_i2c_write(uint8_t id, uint8_t reg_addr, uint8_t *data, uint16_t len)
         return BME280_E_COMM_FAIL;
     }
     return BME280_OK;
-}
-
-void user_delay_ms(uint32_t msec)
-{
-    vTaskDelay(msec / portTICK_RATE_MS);
 }
 
 void print_sensor_data(uint32_t task_idx, struct bme280_data *comp_data)
