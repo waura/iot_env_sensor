@@ -8,6 +8,7 @@
 #include "driver/uart.h"
 
 /* local header */
+#include "mqtt_publisher.h"
 #include "mhz19b_task.h"
 
 #define UART_PORT UART_NUM_2
@@ -20,9 +21,6 @@ static const TickType_t MAX_MQTT_TIMEOUT = 1000 / portTICK_RATE_MS;
 static const char *TAG = "MH-Z19B";
 
 static uint8_t rx_buffer[BUF_SIZE];
-
-static const char publish_Topic_Path[] = "/iot_env_sensor/mh-z19b/";
-static const char publish_SensorData_MsgTemplate[] = "{\"co2 conc\":\"%d\"}";
 
 #pragma pack(1)
 typedef struct
@@ -43,60 +41,14 @@ typedef union
 } mhz19b_request_t;
 #pragma pack()
 
-esp_err_t initialize_mqtt_client(MQTTAgentHandle_t* mqttClientHandle)
+static void publish_sensor_data(MqttPublisherDataHandle_t publishDataHandle, int concentration)
 {
-    MQTTAgentConnectParams_t connectParams;
-
-    if (MQTT_AGENT_Create(mqttClientHandle) != eMQTTAgentSuccess) {
-        ESP_LOGI(TAG, "failed to create MQTT Client");
-        return -1;
-    }
-
-    // initialize connection parameters
-    connectParams.pucClientId = (const uint8_t*) pcTaskGetName(NULL);
-    connectParams.usClientIdLength = (uint16_t) strlen(clientcredentialIOT_THING_NAME);
-    connectParams.pcURL = clientcredentialMQTT_BROKER_ENDPOINT;
-    connectParams.usPort = clientcredentialMQTT_BROKER_PORT;
-    connectParams.xFlags = mqttagentREQUIRE_TLS | mqttagentUSE_AWS_IOT_ALPN_443;    
-    connectParams.xURLIsIPAddress = pdFALSE;    /* Deprecated. */
-    connectParams.xSecuredConnection = pdFALSE; /* Deprecated. */
-    connectParams.pcCertificate = NULL;
-    connectParams.ulCertificateSize = 0;
-    connectParams.pvUserData = NULL;
-    connectParams.pxCallback = NULL;
-
-    ESP_LOGI(TAG, "connecting to %s:%d", connectParams.pcURL, connectParams.usPort);
-
-    if (MQTT_AGENT_Connect(*mqttClientHandle, &connectParams, MAX_MQTT_TIMEOUT) != eMQTTAgentSuccess) {
-        ESP_LOGI(TAG, "failed to connect MQTT Client");
-        return ESP_FAIL;
-    }
-    return ESP_OK;
+    char valueStr[UINT16_MAX_PLACES];
+    snprintf(valueStr, sizeof(valueStr), "%d", concentration);
+    UpdatePublishData(publishDataHandle, "co2 conc", valueStr);
 }
 
-void publish_sensor_data(MQTTAgentHandle_t mqttClientHandle, MQTTQoS_t mqttQos, int concentration)
-{
-    MQTTAgentPublishParams_t publishParams;
-
-    char msg[sizeof(publish_SensorData_MsgTemplate) + UINT16_MAX_PLACES];
-    uint32_t msgLen = (uint32_t) snprintf(msg,
-                                          sizeof(msg),
-                                          publish_SensorData_MsgTemplate,
-                                          concentration);
-
-    publishParams.xQoS = mqttQos;
-    publishParams.pucTopic = (const uint8_t*) publish_Topic_Path;
-    publishParams.usTopicLength = (uint16_t) strlen(publish_Topic_Path);
-    publishParams.pvData = msg;
-    publishParams.ulDataLength = msgLen;
-
-    if (MQTT_AGENT_Publish(mqttClientHandle, &publishParams, MAX_MQTT_TIMEOUT) != eMQTTAgentSuccess)
-    {
-        ESP_LOGI(TAG, "failed to publish MQTT message");
-    }
-}
-
-char get_checksum(char *packet)
+static char get_checksum(char *packet)
 {
     char checksum = 0;
     for(int i = 1; i < 8; i++) {
@@ -107,7 +59,7 @@ char get_checksum(char *packet)
     return checksum;
 }
 
-void create_read_concentration_request(mhz19b_request_t* request)
+static void create_read_concentration_request(mhz19b_request_t* request)
 {
     request->data.start_byte = 0xFF;
     request->data.sensor = 0x01;
@@ -116,12 +68,12 @@ void create_read_concentration_request(mhz19b_request_t* request)
     request->data.checksum = get_checksum(request->data_bytes);
 }
 
-esp_err_t write_request(const mhz19b_request_t* request)
+static esp_err_t write_request(const mhz19b_request_t* request)
 {
     return uart_write_bytes(UART_PORT, request->data_bytes, sizeof(request->data_bytes));
 }
 
-esp_err_t read_concentration_response(uint16_t* concentration)
+static esp_err_t read_concentration_response(uint16_t* concentration)
 {
     int rslt = uart_read_bytes(UART_PORT, rx_buffer, sizeof(rx_buffer), 1000 / portTICK_RATE_MS);
     if (rslt != 9) {
@@ -166,13 +118,8 @@ void mhz19b_task(void *arg)
         return;
     }
 
-    ESP_LOGI(TAG, "initialize MQTT Client");
-
-    MQTTAgentHandle_t mqttClientHandle;
-    if (initialize_mqtt_client(&mqttClientHandle) != ESP_OK) {
-        ESP_LOGI(TAG, "failed to initialize MQTT Client");
-        return;
-    }
+    ESP_LOGI(TAG, "create publish data handle");
+    MqttPublisherDataHandle_t publishDataHandle = CreatePublishDataHandle("mh-z19b");
 
     mhz19b_request_t read_co2_request;
     create_read_concentration_request(&read_co2_request);    
@@ -199,17 +146,15 @@ void mhz19b_task(void *arg)
         }
 
         ESP_LOGI(TAG, "co2: %d", concentration);
-        publish_sensor_data(mqttClientHandle, eMQTTQoS0, concentration);
+        publish_sensor_data(publishDataHandle, concentration);
 
 next_loop:
         // Wait for the next cycle.
         vTaskDelayUntil(&xLastWakeTime, LOOP_FREQUENCY);
     }
 
+    DeletePublishDataHandle(publishDataHandle);
     uart_driver_delete(UART_PORT);
 
-    //MQTT_AGENT_Delete(mqttClientHandle);
-
-    //vSemaphoreDelete(update_mux);
     vTaskDelete(NULL);
 }
