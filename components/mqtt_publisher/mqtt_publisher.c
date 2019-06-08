@@ -29,7 +29,7 @@ static MqttPublisherDataHandle_t publishDataHandleList[PUBLISH_DATA_HANDLE_LIST_
 
 static SemaphoreHandle_t publishDataHandleListMutex;
 
-static const char publish_Topic_Path[] = "%s/sensor";
+static const char publish_Topic_Path[] = "iot_env_sensor/%s/sensor";
 
 
 MqttPublisherError_t prvInitializeMqttClient(MQTTAgentHandle_t* mqttClientHandle)
