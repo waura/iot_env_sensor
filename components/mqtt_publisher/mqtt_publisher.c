@@ -38,7 +38,7 @@ MqttPublisherError_t prvInitializeMqttClient(MQTTAgentHandle_t* mqttClientHandle
 
     if (MQTT_AGENT_Create(mqttClientHandle) != eMQTTAgentSuccess) {
         ESP_LOGI(TAG, "failed to create MQTT Client");
-        return -1;
+        return MQTT_PUBLISHER_ERROR;
     }
 
     // initialize connection parameters

@@ -108,7 +108,7 @@ static void publish_sensor_data(MqttPublisherDataHandle_t publishDataHandle, str
     snprintf(valueStr, sizeof(valueStr), "%0.2f", comp_data->temperature);
     UpdatePublishData(publishDataHandle, "temperature", valueStr);
 
-    snprintf(valueStr, sizeof(valueStr), "%0.2f", comp_data->pressure);
+    snprintf(valueStr, sizeof(valueStr), "%0.2f", comp_data->pressure / 100.0);
     UpdatePublishData(publishDataHandle, "pressure", valueStr);
 
     snprintf(valueStr, sizeof(valueStr), "%0.2f", comp_data->humidity);
