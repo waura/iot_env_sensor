@@ -42,7 +42,7 @@ MqttPublisherError_t prvInitializeMqttClient(MQTTAgentHandle_t* mqttClientHandle
     }
 
     // initialize connection parameters
-    connectParams.pucClientId = (const uint8_t*) pcTaskGetName(NULL);
+    connectParams.pucClientId = (const uint8_t*) clientcredentialIOT_THING_NAME;
     connectParams.usClientIdLength = (uint16_t) strlen(clientcredentialIOT_THING_NAME);
     connectParams.pcURL = clientcredentialMQTT_BROKER_ENDPOINT;
     connectParams.usPort = clientcredentialMQTT_BROKER_PORT;
