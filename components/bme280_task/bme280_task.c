@@ -1,5 +1,4 @@
 
-#define mqttconfigENABLE_DEBUG_LOGS 1
 #define BME280_FLOAT_ENABLE
 
 #include <string.h>
@@ -14,6 +13,7 @@
 #include "driver/bme280_defs.h"
 #include "driver/bme280.h"
 #include "driver/bme280.c"
+#include "mqtt_publisher.h"
 #include "bme280_task.h"
 
 #define FLOAT_MAX_PLACES 10
@@ -30,9 +30,6 @@
 static const TickType_t LOOP_FREQUENCY = 60000 / portTICK_RATE_MS;
 static const TickType_t MAX_MQTT_TIMEOUT = 1000 / portTICK_RATE_MS;
 static const char *TAG = "BME280";
-
-static const char publish_Topic_Path[] = "/iot_env_sensor/bme280/";
-static const char publish_SensorData_MsgTemplate[] = "{\"temperature\":\"%0.2f\",\"pressure\":\"%0.2f\",\"humidity\":\"%0.2f\"}";
 
 void user_delay_ms(uint32_t msec)
 {
@@ -79,7 +76,7 @@ int8_t user_i2c_write(uint8_t id, uint8_t reg_addr, uint8_t *data, uint16_t len)
     return BME280_OK;
 }
 
-void print_sensor_data(uint32_t task_idx, struct bme280_data *comp_data)
+static void print_sensor_data(uint32_t task_idx, struct bme280_data *comp_data)
 {
 #ifdef BME280_FLOAT_ENABLE
     ESP_LOGI(TAG, "TASK[%d] temp %0.2f, p %0.2f, hum %0.2f", task_idx, comp_data->temperature, comp_data->pressure, comp_data->humidity);
@@ -88,7 +85,7 @@ void print_sensor_data(uint32_t task_idx, struct bme280_data *comp_data)
 #endif
 }
 
-void print_sensor_settings(uint32_t task_idx, struct bme280_dev* dev)
+static void print_sensor_settings(uint32_t task_idx, struct bme280_dev* dev)
 {
     int8_t rslt;
 
@@ -104,65 +101,28 @@ void print_sensor_settings(uint32_t task_idx, struct bme280_dev* dev)
     ESP_LOGI(TAG, "TASK[%d] BME280 standby time = %x", task_idx, dev->settings.standby_time);
 }
 
-int8_t initialize_mqtt_client(MQTTAgentHandle_t* mqttClientHandle)
+static void publish_sensor_data(MqttPublisherDataHandle_t publishDataHandle, struct bme280_data* comp_data)
 {
-    MQTTAgentConnectParams_t connectParams;
+    char valueStr[10];
 
-    if (MQTT_AGENT_Create(mqttClientHandle) != eMQTTAgentSuccess) {
-        ESP_LOGI(TAG, "failed to create MQTT Client");
-        return -1;
-    }
+    snprintf(valueStr, sizeof(valueStr), "%0.2f", comp_data->temperature);
+    UpdatePublishData(publishDataHandle, "temperature", valueStr);
 
-    // initialize connection parameters
-    connectParams.pucClientId = (const uint8_t*) pcTaskGetName(NULL);
-    connectParams.usClientIdLength = (uint16_t) strlen(clientcredentialIOT_THING_NAME);
-    connectParams.pcURL = clientcredentialMQTT_BROKER_ENDPOINT;
-    connectParams.usPort = clientcredentialMQTT_BROKER_PORT;
-    connectParams.xFlags = mqttagentREQUIRE_TLS | mqttagentUSE_AWS_IOT_ALPN_443;    
-    connectParams.xURLIsIPAddress = pdFALSE;    /* Deprecated. */
-    connectParams.xSecuredConnection = pdFALSE; /* Deprecated. */
-    connectParams.pcCertificate = NULL;
-    connectParams.ulCertificateSize = 0;
-    connectParams.pvUserData = NULL;
-    connectParams.pxCallback = NULL;
+    snprintf(valueStr, sizeof(valueStr), "%0.2f", comp_data->pressure);
+    UpdatePublishData(publishDataHandle, "pressure", valueStr);
 
-    ESP_LOGI(TAG, "connecting to %s:%d", connectParams.pcURL, connectParams.usPort);
-
-    if (MQTT_AGENT_Connect(*mqttClientHandle, &connectParams, MAX_MQTT_TIMEOUT) != eMQTTAgentSuccess) {
-        ESP_LOGI(TAG, "failed to connect MQTT Client");
-        return -1;
-    }
-    return ESP_OK;
-}
-
-void publish_sensor_data(MQTTAgentHandle_t mqttClientHandle, MQTTQoS_t mqttQos, struct bme280_data* comp_data)
-{
-    MQTTAgentPublishParams_t publishParams;
-
-    char msg[sizeof(publish_SensorData_MsgTemplate) + FLOAT_MAX_PLACES * 3];
-    uint32_t msgLen = (uint32_t) snprintf(msg,
-                                          sizeof(msg),
-                                          publish_SensorData_MsgTemplate,
-                                          comp_data->temperature,
-                                          comp_data->pressure,
-                                          comp_data->humidity);
-
-    publishParams.xQoS = mqttQos;
-    publishParams.pucTopic = (const uint8_t*) publish_Topic_Path;
-    publishParams.usTopicLength = (uint16_t) strlen(publish_Topic_Path);
-    publishParams.pvData = msg;
-    publishParams.ulDataLength = msgLen;
-
-    if (MQTT_AGENT_Publish(mqttClientHandle, &publishParams, MAX_MQTT_TIMEOUT) != eMQTTAgentSuccess)
-    {
-        ESP_LOGI(TAG, "failed to publish MQTT message");
-    }
+    snprintf(valueStr, sizeof(valueStr), "%0.2f", comp_data->humidity);
+    UpdatePublishData(publishDataHandle, "humidity", valueStr);
 }
 
 void bme280_task(void *arg)
 {
     int8_t rslt;
     bme280_task_param_t* param = (bme280_task_param_t*) arg;
+    if (param == NULL) {
+        ESP_LOGE(TAG, "failed to load task parameter");
+        return;
+    }
     uint32_t task_idx = param->task_idx;
     //i2c_port_t i2c_port_num = param->i2c_port_num;
     uint8_t settings_sel;
@@ -171,8 +131,6 @@ void bme280_task(void *arg)
 
     struct bme280_dev dev;
     struct bme280_data comp_data;
-
-    MQTTAgentHandle_t mqttClientHandle;
 
     dev.dev_id = BME280_I2C_ADDR_PRIM;
     dev.intf = BME280_I2C_INTF;
@@ -221,12 +179,8 @@ void bme280_task(void *arg)
     // throw away the first data for stabilizing sensor
     rslt = bme280_get_sensor_data(BME280_ALL, &comp_data, &dev);
 
-    ESP_LOGI(TAG, "TASK[%d] initialize MQTT Client", task_idx);
-
-    if (initialize_mqtt_client(&mqttClientHandle) != ESP_OK) {
-        ESP_LOGI(TAG, "TASK[%d] failed to initialize MQTT Client", task_idx);
-        return;
-    }    
+    ESP_LOGI(TAG, "create publish data handle");
+    MqttPublisherDataHandle_t publishDataHandle = CreatePublishDataHandle("bme280");
 
     ESP_LOGI(TAG, "TASK[%d] start loop", task_idx);
 
@@ -237,15 +191,14 @@ void bme280_task(void *arg)
         rslt = bme280_get_sensor_data(BME280_ALL, &comp_data, &dev);
         if (rslt == BME280_OK) {
             print_sensor_data(task_idx, &comp_data);
-            publish_sensor_data(mqttClientHandle, eMQTTQoS0, &comp_data);
+            publish_sensor_data(publishDataHandle, &comp_data);
         }
 
         // Wait for the next cycle.
         vTaskDelayUntil(&xLastWakeTime, LOOP_FREQUENCY);
     }
 
-    MQTT_AGENT_Delete(mqttClientHandle);
+    DeletePublishDataHandle(publishDataHandle);
 
-    //vSemaphoreDelete(update_mux);
     vTaskDelete(NULL);
 }
