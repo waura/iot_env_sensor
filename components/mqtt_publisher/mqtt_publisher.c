@@ -155,7 +155,7 @@ void prvPublishHandleList(MQTTAgentHandle_t mqttClientHandle)
     strcat(totalMessage, "{");
     bool isFirst = true;
     for (int i = 0; i < PUBLISH_DATA_HANDLE_LIST_MAX_SIZE; i++) {
-        if (publishDataHandleList[i]) {
+        if (publishDataHandleList[i] && publishDataHandleList[i]->pairArraySize > 0) {
             message[0] = '\0';
             if (prvCreatePublishMessage(publishDataHandleList[i], message, PUBLISH_MAX_MESSAGE_SIZE) != MQTT_PUBLISHER_OK) {
                 ESP_LOGW(TAG, "failed to create publish message, handle name = %s", publishDataHandleList[i]->name);
